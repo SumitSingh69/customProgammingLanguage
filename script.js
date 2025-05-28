@@ -126,23 +126,25 @@ function parser(tokens) {
                     value: value
                 };
             }
-        }
-
-        // Print Statement (likho "Hello")
+        }        // Print Statement (likho "Hello" or likho x+y)
         if (token.type === 'keyword' && token.value === 'likho') {
-            const value = tokens.shift();
-            if (value.type === 'string') {
+            // Check if the next token is a string
+            if (tokens[0] && tokens[0].type === 'string') {
+                const value = tokens.shift();
                 return {
                     type: 'print',
                     isString: true,
                     value: value.value
                 };
+            } else {
+                // Parse the entire expression for non-string values
+                const value = parseExpression();
+                return {
+                    type: 'print',
+                    isString: false,
+                    value: value
+                };
             }
-            return {
-                type: 'print',
-                isString: false,
-                value: value.value
-            };
         }
 
         // If-Else Statement (agar x < y { ... } warna { ... })
@@ -254,6 +256,152 @@ function generate(node, language) {
     }
 }
 
+// Interpreter for executing the AST directly
+function executeAST(ast) {
+    const variables = {};
+    let output = '';
+
+    function evaluateExpression(expr) {
+        if (typeof expr === 'number') {
+            return expr;
+        }
+        
+        if (typeof expr === 'string') {
+            // Handle basic arithmetic expressions
+            if (expr.includes('+') || expr.includes('-') || expr.includes('*') || expr.includes('/')) {
+                // Split the expression into tokens
+                const tokens = expr.split(/(\+|\-|\*|\/)/).map(t => t.trim());
+                let result = evaluateToken(tokens[0]);
+                
+                for (let i = 1; i < tokens.length; i += 2) {
+                    const operator = tokens[i];
+                    const operand = evaluateToken(tokens[i + 1]);
+                    
+                    switch (operator) {
+                        case '+':
+                            result += operand;
+                            break;
+                        case '-':
+                            result -= operand;
+                            break;
+                        case '*':
+                            result *= operand;
+                            break;
+                        case '/':
+                            result /= operand;
+                            break;
+                    }
+                }
+                return result;
+            } else {
+                return evaluateToken(expr);
+            }
+        }
+        
+        return expr;
+    }
+
+    function evaluateToken(token) {
+        if (!isNaN(token)) {
+            return parseFloat(token);
+        }
+        if (variables.hasOwnProperty(token)) {
+            return variables[token];
+        }
+        return token;
+    }
+
+    function executeStatement(statement) {
+        switch (statement.type) {
+            case 'declaration':
+                variables[statement.name] = evaluateExpression(statement.value);
+                break;
+            case 'assignment':
+                variables[statement.name] = evaluateExpression(statement.value);
+                break;
+            case 'print':
+                if (statement.isString) {
+                    output += statement.value + '\n';
+                } else {
+                    const result = evaluateExpression(statement.value);
+                    output += result + '\n';
+                }
+                break;
+            case 'conditional':
+                const left = evaluateToken(statement.condition.left.value);
+                const right = evaluateToken(statement.condition.right.value);
+                let conditionMet = false;
+                
+                switch (statement.condition.operator) {
+                    case '<':
+                        conditionMet = left < right;
+                        break;
+                    case '>':
+                        conditionMet = left > right;
+                        break;
+                    case '<=':
+                        conditionMet = left <= right;
+                        break;
+                    case '>=':
+                        conditionMet = left >= right;
+                        break;
+                    case '==':
+                        conditionMet = left == right;
+                        break;
+                    case '!=':
+                        conditionMet = left != right;
+                        break;
+                }
+                
+                if (conditionMet) {
+                    statement.body.forEach(executeStatement);
+                } else if (statement.elseBody.length > 0) {
+                    statement.elseBody.forEach(executeStatement);
+                }
+                break;
+            case 'loop':
+                let loopCount = 0;
+                const maxIterations = 1000; // Prevent infinite loops
+                
+                while (loopCount < maxIterations) {
+                    const loopLeft = evaluateToken(statement.condition.left.value);
+                    const loopRight = evaluateToken(statement.condition.right.value);
+                    let loopConditionMet = false;
+                    
+                    switch (statement.condition.operator) {
+                        case '<':
+                            loopConditionMet = loopLeft < loopRight;
+                            break;
+                        case '>':
+                            loopConditionMet = loopLeft > loopRight;
+                            break;
+                        case '<=':
+                            loopConditionMet = loopLeft <= loopRight;
+                            break;
+                        case '>=':
+                            loopConditionMet = loopLeft >= loopRight;
+                            break;
+                        case '==':
+                            loopConditionMet = loopLeft == loopRight;
+                            break;
+                        case '!=':
+                            loopConditionMet = loopLeft != loopRight;
+                            break;
+                    }
+                    
+                    if (!loopConditionMet) break;
+                    
+                    statement.body.forEach(executeStatement);
+                    loopCount++;
+                }
+                break;
+        }
+    }
+
+    ast.body.forEach(executeStatement);
+    return output.trim();
+}
+
 function compileAndRun() {
     const input = document.getElementById('codeInput').value;
     const outputElement = document.getElementById('output');
@@ -273,56 +421,14 @@ function compileAndRun() {
         const convertedCode = generate(ast, language);
         convertedCodeElement.textContent = convertedCode;
 
-        // For JavaScript execution
-        if (language === 'js') {
-            let consoleOutput = '';
-            const originalConsoleLog = console.log;
-            const originalConsoleError = console.error;
-            
-            // Create a sandbox environment for output capture
-            const sandbox = {
-                console: {
-                    log: function(...args) {
-                        const output = args.map(arg => 
-                            typeof arg === 'object' ? JSON.stringify(arg) : String(arg)
-                        ).join(' ');
-                        consoleOutput += output + '\n';
-                        originalConsoleLog.apply(console, args);
-                    },
-                    error: function(...args) {
-                        const output = args.map(arg => 
-                            typeof arg === 'object' ? JSON.stringify(arg) : String(arg)
-                        ).join(' ');
-                        consoleOutput += 'Error: ' + output + '\n';
-                        originalConsoleError.apply(console, args);
-                    }
-                }
-            };
-
-            try {
-                // Execute the JavaScript code in a safer way
-                const jsCode = generate(ast, 'js');
-                // Wrap the code to use our sandboxed console
-                const wrappedCode = `
-                    with (sandbox) {
-                        ${jsCode}
-                    }
-                `;
-                new Function('sandbox', wrappedCode)(sandbox);
-            } catch (execError) {
-                consoleOutput += 'Execution Error: ' + execError.message + '\n';
-            }
-
-            // Restore original console methods
-            console.log = originalConsoleLog;
-            console.error = originalConsoleError;
-            
-            // Display output
-            outputElement.textContent = consoleOutput.trim() || 'No output';
-        } else {
-            // For other languages, just show that execution is not supported
-            outputElement.textContent = 'Code generated successfully. Use an appropriate compiler/interpreter to execute this code.';
+        // Execute the code using our interpreter
+        try {
+            const executionOutput = executeAST(ast);
+            outputElement.textContent = executionOutput || 'No output';
+        } catch (execError) {
+            outputElement.textContent = 'Execution Error: ' + execError.message;
         }
+
     } catch (error) {
         outputElement.textContent = `Error: ${error.message}`;
         convertedCodeElement.textContent = '';
